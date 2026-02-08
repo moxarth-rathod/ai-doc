@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────
+# AIDoc — docker-compose
+# Run:  docker compose up --build
+# Stop: docker compose down
+# ─────────────────────────────────────────────
+
+services:
+
+  # ── MongoDB ────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: aidoc-mongodb
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      # Remove these two lines if you don't want auth
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-admin}
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Streamlit App ──────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aidoc-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8501}:8501"
+    volumes:
+      # Persist generated docs
+      - ./output:/app/output
+      # Persist HuggingFace model cache (avoids re-download)
+      - hf_cache:/app/.cache/huggingface
+      # Mount .env file for runtime config
+      - ./.env:/app/.env:ro
+      # ── LOCAL REPOS ──
+      # Mount a host directory so the container can read local projects.
+      # Default: your home directory → accessible as /repos inside container.
+      # Change LOCAL_REPOS_PATH in .env to mount a different directory.
+      # Example: LOCAL_REPOS_PATH=/Users/me/projects
+      - ${LOCAL_REPOS_PATH:-~}:/repos:ro
+    environment:
+      # MongoDB connection (points to the Docker service above)
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:-admin}@mongodb:27017/?authSource=admin
+      MONGO_DB: ${MONGO_DB:-aidoc}
+      # LLM keys — loaded from .env or set here
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      CEREBRAS_MODEL: ${CEREBRAS_MODEL:-llama-3.3-70b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      # GitHub token for cloning private repositories (optional)
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Flag so the app knows it's running inside Docker
+      RUNNING_IN_DOCKER: "true"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+    driver: local
+  hf_cache:
+    driver: local
