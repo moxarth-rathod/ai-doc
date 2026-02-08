@@ -1,0 +1,47 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment variables
+.env
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Output (generated docs)
+output/
+
+# Logs
+*.log
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Docker (optional, uncomment if not needed in repo)
+# docker-compose.override.yml
+
+# Misc
+*.bak
+*.tmp
+

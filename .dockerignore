@@ -1,0 +1,34 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker (avoid recursive copy)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Output (mounted as volume)
+output/
+
+# Misc
+.env
+.DS_Store
+*.log
+
