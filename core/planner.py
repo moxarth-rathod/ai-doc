@@ -65,19 +65,46 @@ Your task:
    message queues, cloud services, etc.
 4. **Assess configuration**: How is the project configured? Env vars, config files, etc.
 5. **Understand the architecture**: Entry points, key modules, data flow.
+6. **Discover what makes this project unique**: What are its core concepts, key \
+   workflows, and distinctive features that a reader MUST understand?
 
 Based on your findings, design a CUSTOM documentation structure (5-8 sections) that \
-covers ONLY what is relevant to THIS project. Do NOT include generic sections that \
-don't apply. Every section must be justified by actual code you found.
+is **unique to THIS project**. The sections should read like a hand-crafted README \
+written by the original author — not a generic template.
 
-Guidelines for sections:
-- Always include a "Project Overview" section summarizing what the project is and does.
-- Always include a "Getting Started" section covering setup, installation, and running.
-- Include "Configuration" if there are env vars, config files, or settings.
-- Include "Authentication & Authorization" ONLY if the project actually implements auth.
-- Include "Integrations" ONLY if the project connects to external services or APIs.
-- Include "API Reference" or "Usage" depending on whether it's a service or tool.
-- Include "Architecture" if the project has non-trivial structure worth explaining.
+CRITICAL — Dynamic Section Design:
+- DO NOT fall back on generic template names like "Project Overview", "Getting Started", \
+  "Configuration", "Architecture", "Utilities and Helpers". These are boring and tell \
+  the reader nothing about what makes this project special.
+- Instead, INVENT section titles that capture this project's actual concepts, workflows, \
+  and components. The section titles alone should tell someone what this project is about.
+- Think about what a developer or user would ACTUALLY search for when using this project.
+
+Examples of GOOD project-specific sections (for different projects):
+  • A payment gateway: "Payment Flow & Lifecycle", "Webhook Event Handling", \
+    "Fraud Detection Pipeline", "Merchant Onboarding"
+  • A web scraper: "Crawling Strategy & Rate Limiting", "Data Extraction Pipelines", \
+    "Storage Backends", "Proxy Rotation & Anti-Detection"
+  • A documentation generator: "Generation Pipeline", "Codebase Indexing & RAG", \
+    "AI-Driven Section Planning", "Quality Evaluation & Coverage"
+  • A chat application: "Real-Time Messaging Architecture", "User Presence & Typing \
+    Indicators", "Message Persistence & Search", "Push Notifications"
+  • A CLI tool: "Command Reference & Usage", "Plugin System", "Output Formatting"
+
+Examples of BAD generic sections (avoid these):
+  ✗ "Project Overview" → Instead: "What Is <ProjectName> & Why It Exists"
+  ✗ "Getting Started" → Instead: "Quick Start & Installation" or roll into Overview
+  ✗ "Configuration" → Instead: "Environment & Runtime Settings" or merge into relevant sections
+  ✗ "Utilities and Helpers" → Instead: name the actual utilities, or merge into relevant sections
+  ✗ "Architecture" → Instead: "System Design & Data Flow" or "<Specific>Pipeline Architecture"
+
+Rules:
+- The FIRST section should always orient the reader: what is this project, why does it \
+  exist, and how to get it running. Give it a project-specific title.
+- Every other section must be justified by actual code you found — not by a template.
+- Section titles should be descriptive and specific to the domain of this project.
+- If a concept is small (e.g. a few env vars), fold it into a related section rather \
+  than giving it its own generic section.
 - Audience should be practical: a new developer joining the team or an end-user trying to use it.
 
 IMPORTANT — "Senior Auditor" Rule:
@@ -105,7 +132,7 @@ The JSON must match this exact schema:
   "frameworks_and_tools": ["string"],
   "documentation_sections": [
     {{
-      "title": "string",
+      "title": "string — must be project-specific, NOT generic template names",
       "reason": "string",
       "focus_areas": "string (be very specific: list actual file paths, classes, and functions relevant to this section)",
       "audience": "developer | end-user | both"
@@ -115,6 +142,17 @@ The JSON must match this exact schema:
 
 Include 5-8 documentation_sections. Each section's focus_areas must reference specific \
 files and modules from the project — never use generic placeholders.
+
+SECTION TITLE RULES:
+- Section titles must be specific to THIS project's domain and concepts.
+- AVOID generic names: "Project Overview", "Getting Started", "Configuration", \
+  "Architecture", "Utilities and Helpers". These are template filler.
+- GOOD titles capture the project's actual concepts: e.g. "Generation Pipeline", \
+  "AI-Driven Section Planning", "Codebase Indexing & RAG", "Quality Evaluation".
+- The first section should orient the reader (what this is + how to run it) but \
+  still have a project-specific title, not just "Project Overview".
+- Small topics (e.g. a few config vars) should be folded into related sections, \
+  not given their own generic "Configuration" section.
 
 CRITICAL: Every file in the project must appear in at least one section's focus_areas. \
 If any file is missing, add it to the most relevant section. 100% file coverage is required.
@@ -276,7 +314,7 @@ class ProjectPlanner:
             on_progress(1, total_steps, "Discovering project DNA via RAG...")
         query_engine = self.index.as_query_engine(
             response_mode="compact",
-            similarity_top_k=8,
+            similarity_top_k=20,
         )
         raw_result = query_engine.query(prompt)
         raw_text = str(raw_result)

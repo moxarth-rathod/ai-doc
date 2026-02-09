@@ -52,16 +52,31 @@ class CodebaseIndexer:
         self.config = config
         self._setup_llm()
 
+    # Context window sizes for Cerebras-hosted models
+    _CONTEXT_WINDOWS = {
+        "llama-3.3-70b": 128_000,
+        "llama-3.1-8b": 128_000,
+    }
+
     def _setup_llm(self):
         """Configure the LLM and embedding model globally."""
+        context_window = self._CONTEXT_WINDOWS.get(
+            self.config.llm.model, 128_000
+        )
         Settings.llm = Cerebras(
             model=self.config.llm.model,
             api_key=self.config.llm.api_key,
             temperature=self.config.llm.temperature,
+            context_window=context_window,
         )
         Settings.embed_model = HuggingFaceEmbedding(
             model_name=self.config.embedding.model_name,
         )
+        # Larger chunks preserve more file-level context per node, reducing
+        # the chance of the LLM seeing fragments instead of complete
+        # functions/classes.  Overlap helps retrieval straddle boundaries.
+        Settings.chunk_size = 2048
+        Settings.chunk_overlap = 256
 
     def index_codebase(
         self,
