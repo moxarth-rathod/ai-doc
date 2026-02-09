@@ -972,17 +972,8 @@ def _display_refinement():
             else:
                 cleared = False
 
-    # Display refinement history — latest Q&A pair first, question above answer
-    if st.session_state.refinement_messages:
-        st.markdown("---")
-        msgs = st.session_state.refinement_messages
-        pairs = [msgs[i:i + 2] for i in range(0, len(msgs), 2)]
-        for pair in reversed(pairs):
-            for msg in pair:
-                with st.chat_message(msg["role"]):
-                    if msg["role"] == "user" and "timestamp" in msg:
-                        st.caption(f"🕐 {msg['timestamp']}")
-                    st.markdown(msg["content"])
+    # Placeholder for the spinner — sits right below the Refine button
+    spinner_placeholder = st.empty()
 
     if cleared:
         st.session_state.refinement_messages = []
@@ -997,8 +988,8 @@ def _display_refinement():
             "timestamp": datetime.now(IST).strftime("%b %d, %Y  %I:%M %p IST"),
         })
 
-        # Apply refinement
-        with st.spinner("Applying changes..."):
+        # Apply refinement — spinner appears right below the Refine button
+        with spinner_placeholder, st.spinner(f"Applying changes for '{feedback}'..."):
             writer = st.session_state.doc_writer
             current_md = st.session_state.results["markdown"]
             updated_md = writer.refine(current_md, feedback)
@@ -1078,6 +1069,18 @@ def _display_refinement():
             )
 
         st.rerun()
+
+    # Display refinement history — latest Q&A pair first, question above answer
+    if st.session_state.refinement_messages:
+        st.markdown("---")
+        msgs = st.session_state.refinement_messages
+        pairs = [msgs[i:i + 2] for i in range(0, len(msgs), 2)]
+        for pair in reversed(pairs):
+            for msg in pair:
+                with st.chat_message(msg["role"]):
+                    if msg["role"] == "user" and "timestamp" in msg:
+                        st.caption(f"🕐 {msg['timestamp']}")
+                    st.markdown(msg["content"])
 
 
 # ──────────────────────────────────────────────

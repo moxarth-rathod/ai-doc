@@ -3,10 +3,20 @@ Writer - Generates the final Markdown documentation based on the
 planner's analysis. Each section is written independently using
 RAG queries against the indexed codebase.
 
+Enhanced with:
+  - Direct File Injection: for each section, the actual source code of files
+    mentioned in `focus_areas` is injected into the prompt so the LLM sees
+    real code instead of relying solely on RAG retrieval.
+  - Anti-Hallucination Rules: explicit prompt instructions that prevent the
+    LLM from fabricating file paths, class names, or config values.
+  - Post-Write Verification: lightweight check that flags file-path references
+    in the generated text that do not correspond to real source files.
+
 Also provides refinement: iteratively improving docs based on user feedback.
 """
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Callable, Optional
@@ -19,6 +29,31 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.style_analyzer import ReferenceStyle
     from core.analyzer import HierarchicalContext
+
+
+# ──────────────────────────────────────────────
+# Direct-context budget constants
+# ──────────────────────────────────────────────
+# These control how much raw source code is injected per section.
+# The budget is PER SECTION, so even for a 1000-file repo the cost
+# is bounded: each section injects only the 5-20 files it cares about.
+
+_MAX_DIRECT_CONTEXT_CHARS = 40_000   # ~40 KB of source code per section
+_MAX_LINES_PER_FILE = 300            # truncate very large files
+
+
+# ──────────────────────────────────────────────
+# File-path extraction pattern (used to pull paths from focus_areas)
+# ──────────────────────────────────────────────
+
+_FILE_PATH_RE = re.compile(
+    r'(?:[\w./-]+/)?[\w.-]+\.(?:'
+    r'py|js|ts|jsx|tsx|java|go|rs|rb|php|cs|cpp|c|h|hpp|swift|kt|kts|'
+    r'scala|yaml|yml|toml|json|xml|html|css|scss|sql|sh|bash|md|txt|'
+    r'cfg|ini|env|dockerfile|gradle|cmake|proto|graphql|vue|svelte'
+    r')',
+    re.IGNORECASE,
+)
 
 
 # ──────────────────────────────────────────────
@@ -39,6 +74,7 @@ documentation. You have full access to the indexed codebase via RAG.
 - Focus areas: {focus_areas}
 - Target audience: {audience_description}
 {file_list_block}
+{direct_context_block}
 
 **WRITING INSTRUCTIONS:**
 1. DEEPLY ANALYZE the focus areas for this section. Don't write a shallow overview — \
@@ -78,6 +114,17 @@ Mention file paths explicitly so readers know where to find things.
 9. Do NOT make up features that don't exist in the code. Only document what you can verify.
 10. Aim for **300-800 words** — be comprehensive. If the topic is complex, go longer. \
 Better to be thorough than to leave the reader guessing.
+
+**ANTI-HALLUCINATION RULES — CRITICAL:**
+- If GROUND TRUTH source code is provided above, use it as your PRIMARY source of facts. \
+Every class name, function name, variable, environment variable, and config key you mention \
+MUST appear in either the Ground Truth code or the RAG-retrieved context.
+- NEVER invent file paths, class names, function names, environment variables, or \
+configuration keys. If you are unsure about a specific detail, write \
+"see `<relevant_file>` for details" instead of guessing.
+- If you have NO evidence for a claim in the provided code, state that explicitly instead \
+of fabricating content.
+- Prefer being specific and correct over being comprehensive and wrong.
 
 Write the content for this section now.
 """
@@ -152,6 +199,7 @@ based on user feedback. You have full access to the indexed codebase via RAG.
 - Tech stack: {tech_stack}
 {file_list_block}
 {architecture_block}
+{direct_context_block}
 
 **REWRITING INSTRUCTIONS:**
 1. DEEPLY ANALYZE the user's request. Don't just make surface-level edits — understand \
@@ -172,6 +220,11 @@ go deeper. Better to be comprehensive than to leave the reader with questions.
 8. Only cite code, paths, and features that ACTUALLY exist in the codebase.
 9. Do NOT just repeat the user's question back as the answer — analyze, synthesize, and explain.
 
+**ANTI-HALLUCINATION RULES — CRITICAL:**
+- If GROUND TRUTH source code is provided above, treat it as your PRIMARY source of facts.
+- NEVER invent file paths, class names, function names, or configuration keys.
+- If you are unsure about a detail, write "see `<relevant_file>` for details" instead of guessing.
+
 Write the improved section content now.
 """
 
@@ -188,6 +241,7 @@ documentation. You have full access to the indexed codebase via RAG.
 - Tech stack: {tech_stack}
 {file_list_block}
 {architecture_block}
+{direct_context_block}
 
 **WRITING INSTRUCTIONS:**
 1. DEEPLY ANALYZE what the user wants this section to cover. Don't be shallow.
@@ -203,6 +257,11 @@ configuration keys, and real code references. Be precise and cite actual code.
 6. Do NOT include the section title heading (## ...) — it will be added automatically.
 7. Only cite code, paths, and features that ACTUALLY exist in the codebase.
 8. Do NOT invent features. Only document what you can verify from the codebase.
+
+**ANTI-HALLUCINATION RULES — CRITICAL:**
+- If GROUND TRUTH source code is provided above, treat it as your PRIMARY source of facts.
+- NEVER invent file paths, class names, function names, or configuration keys.
+- If unsure, write "see `<relevant_file>` for details" instead of guessing.
 
 Write the content for this section now.
 """
@@ -223,6 +282,7 @@ documentation. You have full access to the indexed codebase via RAG.
 
 **EXISTING SECTIONS** (already documented):
 {existing_sections}
+{direct_context_block}
 
 **WRITING INSTRUCTIONS:**
 Write a section titled "{section_title}" that thoroughly covers ALL of the uncovered files.
@@ -241,6 +301,10 @@ Requirements:
 - Aim for **200-600 words** — thorough coverage, not one-liners
 - Do NOT include the section title heading (## ...)
 - Only cite code that actually exists in the codebase
+
+**ANTI-HALLUCINATION RULES — CRITICAL:**
+- If GROUND TRUTH source code is provided above, treat it as your PRIMARY source of facts.
+- NEVER invent class names, function names, or config keys — cite only what exists.
 """
 
 
@@ -262,8 +326,12 @@ class DocumentationWriter:
         self.hierarchical_context = hierarchical_context
         self.query_engine = index.as_query_engine(
             response_mode="tree_summarize",
-            similarity_top_k=10,
+            similarity_top_k=20,
         )
+        # Fast lookup dict: path → file info.  Built once, used per section.
+        self._source_file_lookup: dict[str, dict] = {
+            f["path"]: f for f in self.source_files
+        }
 
     def generate(
         self,
@@ -374,8 +442,168 @@ class DocumentationWriter:
             f"and punchy, be brief and punchy. Mirror the reference doc's personality.\n"
         )
 
+    # ──────────────────────────────────────────
+    # Direct file injection (anti-hallucination)
+    # ──────────────────────────────────────────
+
+    @staticmethod
+    def _extract_focus_file_paths(text: str) -> list[str]:
+        """
+        Extract file paths mentioned in a string (typically focus_areas or instructions).
+
+        Returns de-duplicated paths in the order they first appear.
+        """
+        matches = _FILE_PATH_RE.findall(text)
+        return list(dict.fromkeys(matches))  # deduplicate, preserve order
+
+    def _build_direct_context(self, reference_text: str) -> str:
+        """
+        Build a GROUND TRUTH block by injecting the actual source code of files
+        mentioned in *reference_text* (e.g. a section's focus_areas).
+
+        Strategy (scales to 500–1000+ file repos):
+        - Only files referenced in the section's scope are injected — typically 5–20 files.
+        - Each file is capped at _MAX_LINES_PER_FILE lines.
+        - Total injected code is capped at _MAX_DIRECT_CONTEXT_CHARS characters.
+        - The LLM prompt explicitly labels this block as "ground truth" so it takes
+          priority over RAG-retrieved chunks.
+        """
+        if not self.source_files:
+            return ""
+
+        mentioned_paths = self._extract_focus_file_paths(reference_text)
+        if not mentioned_paths:
+            return ""
+
+        lookup = self._source_file_lookup
+        blocks: list[str] = []
+        total_chars = 0
+
+        for path_fragment in mentioned_paths:
+            if total_chars >= _MAX_DIRECT_CONTEXT_CHARS:
+                break
+
+            # Try exact match first
+            file_info = lookup.get(path_fragment)
+
+            # Try suffix match (handles "auth/service.py" vs "src/auth/service.py")
+            if not file_info:
+                for full_path, info in lookup.items():
+                    if full_path.endswith(path_fragment) or full_path.endswith("/" + path_fragment):
+                        file_info = info
+                        break
+
+            if not file_info:
+                continue
+
+            content = file_info["content"]
+            lines = content.split("\n")
+
+            # Truncate very large files
+            if len(lines) > _MAX_LINES_PER_FILE:
+                content = "\n".join(lines[:_MAX_LINES_PER_FILE])
+                content += (
+                    f"\n\n... (truncated — {len(lines)} total lines, "
+                    f"showing first {_MAX_LINES_PER_FILE})"
+                )
+
+            # Respect context budget
+            if total_chars + len(content) > _MAX_DIRECT_CONTEXT_CHARS:
+                remaining = _MAX_DIRECT_CONTEXT_CHARS - total_chars
+                if remaining > 500:  # only include if meaningful amount
+                    content = content[:remaining] + "\n... (truncated to fit context budget)"
+                else:
+                    continue
+
+            blocks.append(f"--- FILE: {file_info['path']} ---\n{content}")
+            total_chars += len(content)
+
+        if not blocks:
+            return ""
+
+        return (
+            "\n**GROUND TRUTH — ACTUAL SOURCE CODE:**\n"
+            "The following is the real source code from files relevant to this section. "
+            "Treat this as your PRIMARY source of truth. Base your documentation on what "
+            "you see here. Do NOT contradict or fabricate details beyond what this code "
+            "and the RAG-retrieved context show.\n\n"
+            + "\n\n".join(blocks)
+            + "\n"
+        )
+
+    def _verify_section(self, content: str) -> str:
+        """
+        Lightweight post-write verification that flags file-path references in the
+        generated text when they don't correspond to any real source file.
+
+        This catches the most common hallucination pattern: the LLM inventing
+        plausible-sounding file paths that don't actually exist.
+
+        For performance, this is pure regex + set-lookup — zero LLM calls.
+        """
+        if not self.source_files:
+            return content
+
+        # Build sets for fast membership checks
+        known_paths_lower: set[str] = set()
+        known_names_lower: set[str] = set()
+        known_stems_lower: set[str] = set()
+
+        for f in self.source_files:
+            p = f["path"]
+            known_paths_lower.add(p.lower())
+            known_names_lower.add(Path(p).name.lower())
+            stem = Path(p).stem.lower()
+            if len(stem) > 3:
+                known_stems_lower.add(stem)
+
+        # Find backtick-quoted file path references
+        ref_pattern = re.compile(
+            r'`((?:[\w./-]+/)?[\w.-]+\.(?:'
+            r'py|js|ts|jsx|tsx|java|go|rs|rb|php|cs|cpp|c|h|hpp|swift|'
+            r'kt|scala|yaml|yml|toml|json|xml|html|css|sql|sh|bash|md|'
+            r'txt|cfg|ini|env|dockerfile|gradle|cmake'
+            r'))`',
+            re.IGNORECASE,
+        )
+
+        hallucinated: list[str] = []
+        for match in ref_pattern.finditer(content):
+            ref = match.group(1)
+            ref_lower = ref.lower()
+
+            # Exact path match
+            if ref_lower in known_paths_lower:
+                continue
+            # Filename match
+            name_lower = Path(ref).name.lower()
+            if name_lower in known_names_lower:
+                continue
+            # Stem match (e.g., "planner" matches "planner.py")
+            stem_lower = Path(ref).stem.lower()
+            if len(stem_lower) > 3 and stem_lower in known_stems_lower:
+                continue
+            # Substring match (covers partial paths)
+            if any(ref_lower in p for p in known_paths_lower):
+                continue
+
+            hallucinated.append(ref)
+
+        # Tag hallucinated references so they stand out in review
+        for h_path in hallucinated:
+            content = content.replace(
+                f"`{h_path}`",
+                f"`{h_path}` *(unverified)*",
+            )
+
+        return content
+
+    # ──────────────────────────────────────────
+    # Section writing
+    # ──────────────────────────────────────────
+
     def _write_section(self, section: DocumentationSection) -> str:
-        """Write a single documentation section using RAG."""
+        """Write a single documentation section using RAG + direct file injection."""
         audience_desc = AUDIENCE_MAP.get(section.audience, AUDIENCE_MAP["both"])
 
         # Build file list block so the LLM knows ALL files in scope
@@ -391,6 +619,9 @@ class DocumentationWriter:
                 file_list_block += f"\n  ... and {len(file_paths) - cap} more files"
             file_list_block += "\n"
 
+        # Build direct source code injection from focus_areas file paths
+        direct_context_block = self._build_direct_context(section.focus_areas)
+
         prompt = SECTION_PROMPT_TEMPLATE.format(
             title=section.title,
             project_name=self.analysis.project_name,
@@ -400,6 +631,7 @@ class DocumentationWriter:
             focus_areas=section.focus_areas,
             audience_description=audience_desc,
             file_list_block=file_list_block,
+            direct_context_block=direct_context_block,
         )
 
         # Inject hierarchical context (module summaries, heat zones, data flow)
@@ -409,7 +641,12 @@ class DocumentationWriter:
         prompt += self._build_style_block()
 
         response = self.query_engine.query(prompt)
-        return str(response).strip()
+        content = str(response).strip()
+
+        # Post-write verification: flag hallucinated file paths
+        content = self._verify_section(content)
+
+        return content
 
     def _build_hierarchical_block(self, section_title: str) -> str:
         """Build a hierarchical context block relevant to the current section."""
@@ -505,6 +742,10 @@ class DocumentationWriter:
             if match:
                 section_titles.append(match.group(1).strip())
 
+        # Build direct context from the actual uncovered files
+        uncovered_text = " ".join(uncovered_files)
+        direct_context_block = self._build_direct_context(uncovered_text)
+
         prompt = COVERAGE_GAP_PROMPT.format(
             project_name=self.analysis.project_name,
             project_type=self.analysis.project_type,
@@ -513,11 +754,14 @@ class DocumentationWriter:
             uncovered_files="\n".join(f"  - {p}" for p in uncovered_files),
             existing_sections="\n".join(f"  - {t}" for t in section_titles),
             section_title="Additional Files & Modules",
+            direct_context_block=direct_context_block,
         )
         prompt += self._build_style_block()
 
         response = self.query_engine.query(prompt)
-        return str(response).strip()
+        content = str(response).strip()
+        content = self._verify_section(content)
+        return content
 
     def _build_footer(self) -> str:
         """Build the document footer."""
@@ -636,7 +880,11 @@ class DocumentationWriter:
         return self._build_hierarchical_block("refinement")
 
     def _rewrite_section(self, title: str, current_content: str, instruction: str) -> str:
-        """Rewrite a single section using RAG + user instruction + full codebase context."""
+        """Rewrite a single section using RAG + direct file injection + user instruction."""
+        # Build direct context from both the instruction and existing content
+        combined_ref = instruction + "\n" + current_content
+        direct_context_block = self._build_direct_context(combined_ref)
+
         prompt = SECTION_REWRITE_PROMPT.format(
             title=title,
             current_content=current_content,
@@ -647,13 +895,18 @@ class DocumentationWriter:
             tech_stack=", ".join(self.analysis.frameworks_and_tools),
             file_list_block=self._build_file_list_block(),
             architecture_block=self._build_architecture_block(),
+            direct_context_block=direct_context_block,
         )
         prompt += self._build_style_block()
         response = self.query_engine.query(prompt)
-        return str(response).strip()
+        content = str(response).strip()
+        content = self._verify_section(content)
+        return content
 
     def _write_new_section(self, title: str, instruction: str) -> str:
-        """Write a brand new section using RAG + full codebase context."""
+        """Write a brand new section using RAG + direct file injection."""
+        direct_context_block = self._build_direct_context(instruction)
+
         prompt = NEW_SECTION_PROMPT.format(
             title=title,
             instruction=instruction,
@@ -663,10 +916,13 @@ class DocumentationWriter:
             tech_stack=", ".join(self.analysis.frameworks_and_tools),
             file_list_block=self._build_file_list_block(),
             architecture_block=self._build_architecture_block(),
+            direct_context_block=direct_context_block,
         )
         prompt += self._build_style_block()
         response = self.query_engine.query(prompt)
-        return str(response).strip()
+        content = str(response).strip()
+        content = self._verify_section(content)
+        return content
 
     @staticmethod
     def _parse_sections(markdown: str) -> list[dict]:
@@ -737,11 +993,12 @@ class DocumentationWriter:
             toc_lines.append(f"{num}. [{title}](#{anchor})")
 
             # Scan content for ### sub-headings
+            # Use 4-space indent + standard "1." numbering for valid nested Markdown lists
             sub_num = 1
             for match in re.finditer(r"^###\s+(.+)", s.get("content", ""), re.MULTILINE):
                 sub_title = match.group(1).strip()
                 sub_anchor = DocumentationWriter._make_anchor(sub_title)
-                toc_lines.append(f"   {num}.{sub_num}. [{sub_title}](#{sub_anchor})")
+                toc_lines.append(f"    {sub_num}. [{sub_title}](#{sub_anchor})")
                 sub_num += 1
 
             num += 1
