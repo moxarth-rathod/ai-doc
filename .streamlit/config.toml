@@ -1,7 +1,7 @@
 [server]
 headless = true
-address = "0.0.0.0"
-port = 8501
+# address = "0.0.0.0"
+# port = 8501
 enableCORS = false
 enableXsrfProtection = false
 
@@ -10,4 +10,3 @@ gatherUsageStats = false
 
 [theme]
 base = "dark"
-

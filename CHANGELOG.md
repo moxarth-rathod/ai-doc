@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-02-09
+
+### Added
+- **Free Deployment Support** — Ready-to-deploy configurations for Streamlit Community Cloud and Hugging Face Spaces.
+- `packages.txt` — Declares system-level dependencies (`git`) for Streamlit Cloud and HF Spaces.
+- `Dockerfile.spaces` — Dedicated Dockerfile for Hugging Face Spaces (Docker SDK) with non-root user, port 7860, and extended health-check start period.
+- `.env.example` — Template for all configurable environment variables.
+- Comprehensive deployment guide in README covering Streamlit Cloud, HF Spaces, and MongoDB Atlas free tier setup.
+
+### Changed
+- `.streamlit/config.toml` — Removed hardcoded `address` and `port` so cloud platforms can manage their own networking. Kept `headless`, CORS, XSRF, and theme settings.
+
 ## [1.1.0] - 2026-02-09
 
 ### Changed

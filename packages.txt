@@ -1,0 +1,4 @@
+# System-level packages required by the app
+# (used by Streamlit Community Cloud and Hugging Face Spaces Streamlit SDK)
+git
+
