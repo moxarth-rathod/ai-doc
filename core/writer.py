@@ -26,35 +26,58 @@ if TYPE_CHECKING:
 # ──────────────────────────────────────────────
 
 SECTION_PROMPT_TEMPLATE = """\
-You are writing the "{title}" section of a project documentation.
+You are a senior technical writer creating the "{title}" section of comprehensive project \
+documentation. You have full access to the indexed codebase via RAG.
 
-Context about the project:
+**PROJECT CONTEXT:**
 - Project: {project_name}
 - Type: {project_type}
 - Summary: {summary}
 - Tech stack: {tech_stack}
 
-This section should focus on: {focus_areas}
-Target audience: {audience_description}
+**SECTION SCOPE:**
+- Focus areas: {focus_areas}
+- Target audience: {audience_description}
 {file_list_block}
-Instructions:
-- Write clearly and concisely. Avoid unnecessary jargon.
-- ONLY cite code, files, classes, functions, and config keys that ACTUALLY EXIST in the \
-  codebase and are relevant to THIS specific section. Never invent examples.
-- Use the actual file paths, class names, and function signatures you retrieve from the \
-  code. If the code shows `class PaymentService` in `src/payments/service.py`, cite that \
-  exactly — do not generalize or substitute.
-- Each section is independent: use whatever examples are most relevant HERE, even if a \
-  different section uses different examples for the same concept. Precision > consistency.
-- Reference as many of the source files listed above as are relevant to THIS section. \
-  Mention file paths explicitly so readers know where to find things.
-- If this section is for end-users, keep it simple and action-oriented.
-- If this section is for developers, include relevant technical details but stay high-level \
-  (no need to explain every line of code).
-- Use bullet points and sub-headings to make it scannable.
-- Do NOT include the section title as a heading (it will be added automatically).
-- Do NOT make up features that don't exist in the code. Only document what you can verify.
-- Keep this section focused and between 150-500 words.
+
+**WRITING INSTRUCTIONS:**
+1. DEEPLY ANALYZE the focus areas for this section. Don't write a shallow overview — \
+provide thorough, detailed technical documentation that a developer or user can actually \
+rely on.
+
+2. For every concept you document, CITE the actual codebase:
+   - Reference specific file paths: "In `path/to/file.py`..."
+   - Name actual classes and functions: "The `ClassName.method()` handles..."
+   - Show real configuration keys, environment variables, and constants
+   - Describe actual parameters, return types, and behaviors from the code
+   - If the code shows `class PaymentService` in `src/payments/service.py`, cite that \
+     exactly — do not generalize or substitute.
+
+3. EXPLAIN how things work, not just what they are:
+   - Describe the data flow: what triggers what, where data enters, transforms, and exits
+   - Explain architectural decisions: why the code is structured this way
+   - Show component interactions: how this part connects to other parts of the system
+   - Cover edge cases, error handling, and important configuration options
+
+4. Each section is independent: use whatever examples are most relevant HERE, even if a \
+different section uses different examples for the same concept. Precision > consistency.
+
+5. Reference as many of the source files listed above as are relevant to THIS section. \
+Mention file paths explicitly so readers know where to find things.
+
+6. FORMATTING:
+   - Use sub-headings (### level) to organize within this section
+   - Use bullet points for lists of features, parameters, or options
+   - Use code blocks (```) for file paths, class names, config keys, and short code snippets
+   - Make it scannable — a reader should be able to skim and find what they need
+
+7. If this section is for end-users, keep it action-oriented but still thorough.
+   If for developers, include technical depth — explain implementation details, not just API surface.
+
+8. Do NOT include the section title as a heading (## ...) — it will be added automatically.
+9. Do NOT make up features that don't exist in the code. Only document what you can verify.
+10. Aim for **300-800 words** — be comprehensive. If the topic is complex, go longer. \
+Better to be thorough than to leave the reader guessing.
 
 Write the content for this section now.
 """
@@ -71,105 +94,153 @@ AUDIENCE_MAP = {
 # ──────────────────────────────────────────────
 
 REFINEMENT_PLAN_PROMPT = """\
-You are helping refine project documentation based on user feedback.
+You are a senior technical writer helping refine project documentation based on user feedback.
 
-The documentation currently has these sections:
+The documentation currently has these sections (with brief content summaries):
 {section_list}
 
 User feedback: "{feedback}"
 
-Determine what changes to make. Return a JSON object (no markdown fences, no explanation):
+Determine what changes to make. Think carefully about:
+1. Does the user want to ADD entirely new content/sections?
+2. Does the user want to MODIFY existing sections with more detail, examples, or corrections?
+3. Does the user want to REMOVE sections?
+4. Should modifications be DEEP (significant rewrite with new content from the codebase) \
+or SHALLOW (small wording/structural tweaks)?
+
+Return a JSON object (no markdown fences, no explanation):
 {{
   "actions": [
     {{
       "type": "modify | remove | add",
       "section_title": "Exact Section Title to modify/remove, or new title for add",
-      "instruction": "Brief description of what to change or what to write"
+      "instruction": "DETAILED description of what to change, what to add, what to focus on, \
+and what codebase areas to query for supporting information"
     }}
   ]
 }}
 
 Rules:
-- "modify": Rewrite the named section based on the instruction.
+- "modify": Rewrite the named section. The instruction MUST be detailed — specify what \
+to add, elaborate, or change. Include which files, classes, or modules to investigate.
 - "remove": Delete the named section entirely.
-- "add": Create a new section with the given title and instruction.
+- "add": Create a new section. The instruction MUST describe scope, depth, and what \
+codebase areas to analyze for content.
 - You can list multiple actions if needed.
 - For "modify", section_title must EXACTLY match one of the existing section titles.
+- Make instructions specific and actionable — NOT vague like "improve this section". \
+Instead say "Add detailed explanation of the authentication flow in auth/service.py, \
+including how tokens are generated, validated, and refreshed. Include code references."
 - Return ONLY the JSON object.
 """
 
 SECTION_REWRITE_PROMPT = """\
-You are rewriting the "{title}" section of project documentation based on user feedback.
+You are a senior technical writer rewriting the "{title}" section of project documentation \
+based on user feedback. You have full access to the indexed codebase via RAG.
 
-The current content of this section is:
+**CURRENT CONTENT OF THIS SECTION:**
 ---
 {current_content}
 ---
 
-User wants: {instruction}
+**WHAT THE USER WANTS:** {instruction}
 
-Context about the project:
-- Project: {project_name}
-- Type: {project_type}
-- Summary: {summary}
-
-Rewrite this section applying the user's feedback. Keep the same style and formatting.
-Only change what the user requested — preserve everything else that is correct.
-Do NOT include the section title heading (## ...) — it will be added automatically.
-Only cite code that actually exists in the codebase. Be precise and accurate.
-Return ONLY the rewritten section content.
-"""
-
-NEW_SECTION_PROMPT = """\
-You are writing a NEW section titled "{title}" for project documentation.
-
-User instruction: {instruction}
-
-Context about the project:
+**PROJECT CONTEXT:**
 - Project: {project_name}
 - Type: {project_type}
 - Summary: {summary}
 - Tech stack: {tech_stack}
+{file_list_block}
+{architecture_block}
 
-Instructions:
-- Write clearly and concisely, between 100-400 words.
-- Only cite code, files, and features that actually exist in the codebase.
-- Use bullet points and sub-headings to make it scannable.
-- Do NOT include the section title heading (## ...).
-- Be precise — verify everything against the codebase.
+**REWRITING INSTRUCTIONS:**
+1. DEEPLY ANALYZE the user's request. Don't just make surface-level edits — understand \
+the intent and produce comprehensive, detailed content.
+2. QUERY the codebase thoroughly. Pull in actual file paths, class names, function \
+signatures, configuration keys, and data flows from the indexed code. Cite them precisely.
+3. When adding or expanding content, write in-depth explanations with:
+   - How the code actually works (cite specific files and functions)
+   - Why it's designed that way (architectural decisions)
+   - How different components interact (data flow, dependencies)
+   - Concrete code references: "In `path/to/file.py`, the `ClassName.method()` handles..."
+4. Preserve existing content that is correct and not affected by the user's request. \
+Merge new content naturally with the existing material.
+5. Use bullet points, sub-headings, and code blocks to make it scannable.
+6. Aim for **300-800 words** — be thorough, not terse. If the topic warrants depth, \
+go deeper. Better to be comprehensive than to leave the reader with questions.
+7. Do NOT include the section title heading (## ...) — it will be added automatically.
+8. Only cite code, paths, and features that ACTUALLY exist in the codebase.
+9. Do NOT just repeat the user's question back as the answer — analyze, synthesize, and explain.
+
+Write the improved section content now.
+"""
+
+NEW_SECTION_PROMPT = """\
+You are a senior technical writer creating a NEW section titled "{title}" for project \
+documentation. You have full access to the indexed codebase via RAG.
+
+**USER INSTRUCTION:** {instruction}
+
+**PROJECT CONTEXT:**
+- Project: {project_name}
+- Type: {project_type}
+- Summary: {summary}
+- Tech stack: {tech_stack}
+{file_list_block}
+{architecture_block}
+
+**WRITING INSTRUCTIONS:**
+1. DEEPLY ANALYZE what the user wants this section to cover. Don't be shallow.
+2. QUERY the codebase and pull in actual file paths, class names, function signatures, \
+configuration keys, and real code references. Be precise and cite actual code.
+3. Write a comprehensive, detailed section that:
+   - Explains the topic thoroughly with references to actual source code
+   - Shows how components interact (data flow, dependencies)
+   - Uses concrete examples from the codebase: "In `path/to/file.py`, the `Function()` ..."
+   - Covers edge cases, configuration options, and important details
+4. Use bullet points, sub-headings, and code blocks to make it scannable.
+5. Aim for **300-800 words** — thorough and detailed, not a brief summary.
+6. Do NOT include the section title heading (## ...) — it will be added automatically.
+7. Only cite code, paths, and features that ACTUALLY exist in the codebase.
+8. Do NOT invent features. Only document what you can verify from the codebase.
 
 Write the content for this section now.
 """
 
 
 COVERAGE_GAP_PROMPT = """\
-You are writing ADDITIONAL documentation to cover files that were missed in the previous \
-round of documentation generation.
+You are a senior technical writer covering files that were missed in the initial \
+documentation. You have full access to the indexed codebase via RAG.
 
-Context about the project:
+**PROJECT CONTEXT:**
 - Project: {project_name}
 - Type: {project_type}
 - Summary: {summary}
 - Tech stack: {tech_stack}
 
-The following files were NOT mentioned anywhere in the documentation:
+**UNCOVERED FILES** (NOT mentioned anywhere in existing documentation):
 {uncovered_files}
 
-Existing sections in the documentation:
+**EXISTING SECTIONS** (already documented):
 {existing_sections}
 
-Write a section titled "{section_title}" that covers ALL of the uncovered files listed above.
-For each file:
-- State its path and purpose.
-- Highlight key classes, functions, or configuration it provides.
-- Explain how it relates to other parts of the project.
+**WRITING INSTRUCTIONS:**
+Write a section titled "{section_title}" that thoroughly covers ALL of the uncovered files.
 
-Instructions:
-- You MUST mention EVERY file path from the uncovered list.
-- Be concise but cover each file.
-- Use bullet points and sub-headings.
-- Do NOT include the section title heading (## ...).
-- Only cite code that actually exists.
+For each file or group of related files:
+- State its path and explain its **purpose** in the system
+- Describe **key classes, functions, or configuration** it provides — name them specifically
+- Explain **how it relates to other parts of the project** (data flow, dependencies, imports)
+- If it's a utility/helper, explain what other modules depend on it
+- If it's a configuration file, explain what it configures and important default values
+
+Requirements:
+- You MUST mention EVERY file path from the uncovered list
+- Use sub-headings (### level) to group related files
+- Use bullet points for details within each file/group
+- Aim for **200-600 words** — thorough coverage, not one-liners
+- Do NOT include the section title heading (## ...)
+- Only cite code that actually exists in the codebase
 """
 
 
@@ -256,7 +327,11 @@ class DocumentationWriter:
         # Footer
         sections.append(self._build_footer())
 
-        return "\n\n---\n\n".join(sections)
+        # Rebuild TOC now that all sections (and their ### sub-headings) exist
+        full_md = "\n\n---\n\n".join(sections)
+        parsed = self._parse_sections(full_md)
+        self._rebuild_toc(parsed)
+        return self._reassemble_sections(parsed)
 
     def _build_header(self) -> str:
         """Build the document header."""
@@ -476,9 +551,18 @@ class DocumentationWriter:
         sections = self._parse_sections(markdown)
         section_titles = [s["title"] for s in sections if s["title"]]
 
-        # Step 1: Ask LLM what changes to make
+        # Build section list with content previews (first 150 chars) for better planning
+        section_summaries = []
+        for s in sections:
+            if s["title"]:
+                preview = s["content"][:150].replace("\n", " ").strip()
+                if len(s["content"]) > 150:
+                    preview += "..."
+                section_summaries.append(f"  - **{s['title']}**: {preview}")
+
+        # Step 1: Ask LLM what changes to make (with content awareness)
         plan_prompt = REFINEMENT_PLAN_PROMPT.format(
-            section_list="\n".join(f"  - {t}" for t in section_titles),
+            section_list="\n".join(section_summaries),
             feedback=feedback,
         )
         plan_response = Settings.llm.complete(plan_prompt)
@@ -527,11 +611,32 @@ class DocumentationWriter:
                     "raw": f"## {title}\n\n{new_content}",
                 })
 
-        # Step 3: Reassemble markdown
+        # Step 3: Rebuild the Table of Contents to reflect added/removed sections
+        self._rebuild_toc(sections)
+
+        # Step 4: Reassemble markdown
         return self._reassemble_sections(sections)
 
+    def _build_file_list_block(self) -> str:
+        """Build a file list block so the LLM knows all source files in scope."""
+        if not self.source_files:
+            return ""
+        file_paths = [f["path"] for f in self.source_files]
+        cap = 100
+        block = (
+            "\n**Source files in the codebase** (reference relevant ones):\n"
+            + "\n".join(f"  - {p}" for p in file_paths[:cap])
+        )
+        if len(file_paths) > cap:
+            block += f"\n  ... and {len(file_paths) - cap} more files"
+        return block + "\n"
+
+    def _build_architecture_block(self) -> str:
+        """Build a compact architecture context block for refinement prompts."""
+        return self._build_hierarchical_block("refinement")
+
     def _rewrite_section(self, title: str, current_content: str, instruction: str) -> str:
-        """Rewrite a single section using RAG + user instruction."""
+        """Rewrite a single section using RAG + user instruction + full codebase context."""
         prompt = SECTION_REWRITE_PROMPT.format(
             title=title,
             current_content=current_content,
@@ -539,12 +644,16 @@ class DocumentationWriter:
             project_name=self.analysis.project_name,
             project_type=self.analysis.project_type,
             summary=self.analysis.one_line_summary,
+            tech_stack=", ".join(self.analysis.frameworks_and_tools),
+            file_list_block=self._build_file_list_block(),
+            architecture_block=self._build_architecture_block(),
         )
+        prompt += self._build_style_block()
         response = self.query_engine.query(prompt)
         return str(response).strip()
 
     def _write_new_section(self, title: str, instruction: str) -> str:
-        """Write a brand new section using RAG."""
+        """Write a brand new section using RAG + full codebase context."""
         prompt = NEW_SECTION_PROMPT.format(
             title=title,
             instruction=instruction,
@@ -552,6 +661,8 @@ class DocumentationWriter:
             project_type=self.analysis.project_type,
             summary=self.analysis.one_line_summary,
             tech_stack=", ".join(self.analysis.frameworks_and_tools),
+            file_list_block=self._build_file_list_block(),
+            architecture_block=self._build_architecture_block(),
         )
         prompt += self._build_style_block()
         response = self.query_engine.query(prompt)
@@ -588,6 +699,57 @@ class DocumentationWriter:
             })
 
         return sections
+
+    @staticmethod
+    def _make_anchor(text: str) -> str:
+        """Convert a heading text to a GitHub-style markdown anchor."""
+        anchor = text.lower().strip()
+        anchor = re.sub(r"[^a-z0-9\s-]", "", anchor)   # remove special chars
+        anchor = re.sub(r"\s+", "-", anchor)             # spaces → hyphens
+        anchor = re.sub(r"-+", "-", anchor).strip("-")   # collapse multiple hyphens
+        return anchor
+
+    @staticmethod
+    def _rebuild_toc(sections: list[dict]) -> None:
+        """
+        Find the Table of Contents section and rebuild it from current sections.
+        Includes ## section titles and ### sub-headings found in section content.
+        Modifies the sections list in-place.
+        """
+        toc_idx = None
+        for i, s in enumerate(sections):
+            if s.get("title") == "Table of Contents":
+                toc_idx = i
+                break
+
+        if toc_idx is None:
+            return  # No TOC section found — nothing to rebuild
+
+        # Collect all titled sections (skip TOC itself)
+        toc_lines = [""]
+        num = 1
+        for s in sections:
+            title = s.get("title")
+            if not title or title == "Table of Contents":
+                continue
+
+            anchor = DocumentationWriter._make_anchor(title)
+            toc_lines.append(f"{num}. [{title}](#{anchor})")
+
+            # Scan content for ### sub-headings
+            sub_num = 1
+            for match in re.finditer(r"^###\s+(.+)", s.get("content", ""), re.MULTILINE):
+                sub_title = match.group(1).strip()
+                sub_anchor = DocumentationWriter._make_anchor(sub_title)
+                toc_lines.append(f"   {num}.{sub_num}. [{sub_title}](#{sub_anchor})")
+                sub_num += 1
+
+            num += 1
+
+        # Update the TOC section in-place
+        new_toc_content = "\n".join(toc_lines)
+        sections[toc_idx]["content"] = new_toc_content
+        sections[toc_idx]["raw"] = f"## Table of Contents\n{new_toc_content}"
 
     @staticmethod
     def _reassemble_sections(sections: list[dict]) -> str:
